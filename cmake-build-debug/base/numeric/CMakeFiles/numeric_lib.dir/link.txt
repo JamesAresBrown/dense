@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC   -g   -shared -Wl,-soname,libnumeric_lib.so -o /home/hzx/catkin_ws/devel/lib/libnumeric_lib.so CMakeFiles/numeric_lib.dir/mylapack.cc.o 

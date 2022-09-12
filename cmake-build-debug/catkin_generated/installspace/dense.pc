@@ -1,0 +1,8 @@
+prefix=/usr/local
+
+Name: dense
+Description: Description of dense
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

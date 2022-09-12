@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC   -g   -shared -Wl,-soname,libimage_lib.so -o /home/hzx/catkin_ws/devel/lib/libimage_lib.so CMakeFiles/image_lib.dir/camera.cc.o CMakeFiles/image_lib.dir/image.cc.o CMakeFiles/image_lib.dir/photo.cc.o CMakeFiles/image_lib.dir/photoSetS.cc.o 
