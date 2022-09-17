@@ -3,7 +3,9 @@
 path: ../../../
 root_name: pdense1
 option_name: option-0000
-max_num: 20
+max_num: 30
+is_PCD: 1
+is_global: 1
 option:
   head: 0
   level: 0

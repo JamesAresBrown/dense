@@ -1,1 +1,0 @@
-/usr/bin/c++    -g    -rdynamic CMakeFiles/cmvs.dir/cmvs.cc.o  -o /home/hzx/catkin_ws/devel/lib/dense/cmvs  -Wl,-rpath,/home/hzx/catkin_ws/devel/lib -lcmvs_lib /home/hzx/catkin_ws/devel/lib/libimage_lib.so /home/hzx/catkin_ws/devel/lib/libgraclus_lib.so -lpthread -ljpeg /home/hzx/catkin_ws/devel/lib/libtinycthread.a 

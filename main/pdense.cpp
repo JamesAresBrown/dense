@@ -15,19 +15,20 @@
 #include <iostream>
 
 #include "../base/pmvs/findMatch.h"
-#include "../base/pmvs/option.h"
 
 using namespace std;
 
 Pdense::Pdense(const string &config_path) {
     cv::FileStorage fsSettings(config_path, cv::FileStorage::READ);
     if(!fsSettings.isOpened())
-        std::cerr << "ERROR: Wrong path to settings" << std::endl;
+        cerr << "ERROR: Wrong path to settings" << endl;
 
     config_path_ = config_path;
 
     fsSettings["option_name"] >> option_name_;
     fsSettings["max_num"] >> max_num_;
+    fsSettings["is_PCD"] >> isPCD_;
+    fsSettings["is_global"] >> isGlobal_;
 
     string path, root_name;
     fsSettings["path"] >> path;
@@ -36,16 +37,16 @@ Pdense::Pdense(const string &config_path) {
 
     string folder_path = path + "pdense";
     if(access(root_path_.c_str(), 0)){
-        cerr << "Folder(" + root_name + ") does not exist! Will create a new one!" <<std::endl;
+        cerr << "Folder(" + root_name + ") does not exist! Will create a new one!" << endl;
         if(mkdir(root_path_.c_str(), 0771) == 0){ // 成功返回0，不成功返回-1
-            std::cout<<"Created successfully"<<std::endl;
+            cout << "Folder(" + root_name + ") created successfully" << endl;
             mkdir(string(root_path_ + "models").c_str(), 0771);
             mkdir(string(root_path_ + "txt").c_str(), 0771);
             mkdir(string(root_path_ + "visualize").c_str(), 0771);
         }
     }
     else {
-        std::cerr << "Folder(pdense) exist!" << std::endl;
+        cerr << "Folder(" + root_name + ") exist!" << endl;
     }
 }
 
@@ -53,7 +54,75 @@ Pdense::Pdense(const string &config_path, const string& option_name) : Pdense(co
     option_name_ = option_name;
 }
 
-cv::Mat Pdense::Gray2Color(cv::Mat &phase)
+
+void Pdense::Write(const Eigen::Matrix3d& R, const Eigen::Vector3d& T, const cv::Mat& img) {
+    if (!get_InitGPS())
+        return;
+    stringstream name;
+    name << setfill('0') << setw(8) << num_image_;
+    ofstream foutC;
+    foutC.open(root_path_ + "txt/" + name.str() + ".txt", std::ios::out);  //以写入和在文件末尾添加的方式打开.txt文件，没有的话就创建该文件。
+    if (!foutC.is_open()) {
+        cerr << "Projection storage failed for picture number " << to_string(num_image_) << "." << endl;
+        return;
+    }
+
+//    Eigen::Matrix3d tmp_R = estimator.Rs[WINDOW_SIZE] * estimator.ric[0];
+//    Eigen::Vector3d tmp_T = estimator.Ps[WINDOW_SIZE] + estimator.Rs[WINDOW_SIZE] * estimator.tic[0];
+    Eigen::Matrix3d tmp_R = R;
+    Eigen::Vector3d tmp_T = T;
+    Eigen::Matrix3d ric;
+    Eigen::Vector3d tic;
+    ric << 1, 0, 0, 0, 1, 0, 0, 0, 1;
+    tic << 0, 0 ,0;
+    Eigen::Matrix3d K;
+//    Eigen::Matrix3d tmp_R = R * ric;
+//    Eigen::Vector3d tmp_T = T + R * tic;
+
+    /* kitti_10_03_config.yaml */
+    K << 718.856 , 0 , 607.1928,
+            0 , 718.856 , 185.2157,
+            0, 0, 1;
+//    /* cam0_pinhole.yaml */
+//    K << 461.15862106007575 , 0 , 362.65929181685937,
+//            0 , 459.75286598073296 , 248.52105668448124,
+//            0, 0, 1;
+    Eigen::Matrix<double, 3, 4> projection;
+    tmp_R = tmp_R.inverse().eval();
+    tmp_T = tmp_R * tmp_T;
+
+    projection << tmp_R(0,0) , tmp_R(0,1) , tmp_R(0,2) , -tmp_T(0),
+            tmp_R(1,0) , tmp_R(1,1) , tmp_R(1,2) , -tmp_T(1),
+            tmp_R(2,0) , tmp_R(2,1) , tmp_R(2,2) , -tmp_T(2);
+    projection = K * projection;
+
+    foutC << "CONTOUR" << endl;
+    foutC.setf(ios::fixed, ios::floatfield);
+    foutC.precision(16);
+    foutC << projection(0,0) << " " << projection(0,1) << " " << projection(0,2) << " " << projection(0,3) << endl
+          << projection(1,0) << " " << projection(1,1) << " " << projection(1,2) << " " << projection(1,3) << endl
+          << projection(2,0) << " " << projection(2,1) << " " << projection(2,2) << " " << projection(2,3) << endl;
+
+    foutC.close();
+
+    if (img.channels() <= 1)
+        cv::imwrite(root_path_+ "visualize/" + name.str() + ".jpg", Gray2Color(img));
+    else
+        cv::imwrite(root_path_+ "visualize/" + name.str() + ".jpg", img);
+
+    std::ofstream foutC2("/home/hzx/catkin_ws/vio_estimator_" + option_name_ + ".csv", ios::app);
+    foutC2.setf(ios::fixed, ios::floatfield);
+    foutC2.precision(16);
+    foutC2 << tmp_T.x() << ","
+           << tmp_T.y() << ","
+           << tmp_T.z() << endl;
+
+    foutC2.close();
+
+    ++num_image_;
+}
+
+cv::Mat Pdense::Gray2Color(const cv::Mat& phase)
 {
     CV_Assert(phase.channels() == 1);
 
@@ -129,60 +198,8 @@ cv::Mat Pdense::Gray2Color(cv::Mat &phase)
     return result;
 }
 
-//void Pdense::write(const Estimator& estimator, cv::Mat img) {
-//    stringstream name;
-//    name << setfill('0') << setw(8) << num_image_;
-//    ofstream foutC;
-//    foutC.open(root_path_ + "txt/" + name.str() + ".txt", std::ios::out);  //以写入和在文件末尾添加的方式打开.txt文件，没有的话就创建该文件。
-//    if (!foutC.is_open()) {
-//        cerr << "Projection storage failed for picture number " << to_string(num_image_) << "." << endl;
-//        return;
-//    }
-//
-//    Eigen::Matrix3d tmp_R = estimator.Rs[WINDOW_SIZE] * estimator.ric[0];
-//    Eigen::Vector3d tmp_T = estimator.Ps[WINDOW_SIZE] + estimator.Rs[WINDOW_SIZE] * estimator.tic[0];
-//    Matrix3d K;
-//    /* kitti_10_03_config.yaml */
-//    K << 718.856 , 0 , 607.1928,
-//            0 , 718.856 , 185.2157,
-//            0, 0, 1;
-////    /* cam0_pinhole.yaml */
-////    K << 461.15862106007575 , 0 , 362.65929181685937,
-////            0 , 459.75286598073296 , 248.52105668448124,
-////            0, 0, 1;
-//    Matrix<double, 3, 4> projection;
-//    tmp_R = tmp_R.inverse().eval();
-//    tmp_T = tmp_R * tmp_T;
-//
-//    projection << tmp_R(0,0) , tmp_R(0,1) , tmp_R(0,2) , -tmp_T(0),
-//            tmp_R(1,0) , tmp_R(1,1) , tmp_R(1,2) , -tmp_T(1),
-//            tmp_R(2,0) , tmp_R(2,1) , tmp_R(2,2) , -tmp_T(2);
-//    projection = K * projection;
-//
-//    foutC << "CONTOUR" << endl;
-//    foutC.setf(ios::fixed, ios::floatfield);
-//    foutC.precision(6);
-//    foutC << projection(0,0) << " " << projection(0,1) << " " << projection(0,2) << " " << projection(0,3) << endl
-//          << projection(1,0) << " " << projection(1,1) << " " << projection(1,2) << " " << projection(1,3) << endl
-//          << projection(2,0) << " " << projection(2,1) << " " << projection(2,2) << " " << projection(2,3) << endl;
-//
-//    foutC.close();
-//
-//    if (img.channels() <= 1) img = Gray2Color(img);
-//    cv::imwrite(root_path_+ "visualize/" + name.str() + ".jpg", img);
-//
-//    std::ofstream foutC2("/home/hzx/catkin_ws/vio_estimator_" + option_name_ + ".csv", ios::app);
-//    foutC2.setf(ios::fixed, ios::floatfield);
-//    foutC2.precision(16);
-//    foutC2 << tmp_T.x() << ","
-//          << tmp_T.y() << ","
-//          << tmp_T.z() << endl;
-//    foutC2.close();
-//
-//    ++num_image_;
-//}
-
-void Pdense::pmvs2() const {
+void Pdense::pmvs2() {
+    GenerateOption();
     cout << root_path_<< endl;
     cout << option_name_ << endl;
 
@@ -207,9 +224,13 @@ void Pdense::pmvs2() const {
 //    }
 
     findMatch.write(root_path_ + "models/" + option_name_, bExportPLY, bExportPatch, bExportPSet);
+    if (isPCD_)
+        PLY2PCD();
+    if (isGlobal_)
+        Global();
 }
 
-void Pdense::generateOption() {
+void Pdense::GenerateOption() {
     cv::FileStorage fsSettings(config_path_, cv::FileStorage::READ);
     if(!fsSettings.isOpened()) {
         std::cerr << "ERROR: Wrong path to settings" << std::endl;
@@ -250,7 +271,6 @@ void Pdense::PLY2PCD() const {
     writer.writeASCII(root_path_ + "models/" + option_name_ + ".pcd", point_cloud);
 }
 
-
 void Pdense::Combine() {
     pcl::PointCloud<pcl::PointXYZRGB> cloud_a;
     pcl::PointCloud<pcl::PointXYZRGB> cloud_b;
@@ -274,6 +294,17 @@ void Pdense::Combine() {
 //    initGPS_ = true;
 //}
 
+void Pdense::InitGPS(const Eigen::Vector3d& T, const double& latitude, const double& longitude, const double& altitude) {
+    if (initGPS_)
+        return;
+    origin_T_ = T;
+    geoConverter.Reset(latitude, longitude, altitude);
+    initGPS_ = true;
+    cerr.precision(10);
+    cerr << "InitGPS successfully. " << latitude << " " << longitude << " " << altitude << endl;
+}
+
+
 void Pdense::Global() const {
     if (!initGPS_)
         return;
@@ -293,66 +324,11 @@ void Pdense::Global() const {
     double lla[3];
     for (auto point : pcd) {
         geoConverter.Reverse(point.x - origin_T_.x(), point.y - origin_T_.y(), point.z - origin_T_.z(), lla[0], lla[1], lla[2]);
+        foutC.precision(16);
         foutC << lla[0] << " " << lla[1] << " " << lla[2] << endl;
     }
 
     foutC.close();
-}
-
-void Pdense::write(const Eigen::Matrix3d &R, const Eigen::Vector3d &T, const cv::Mat &img) {
-    stringstream name;
-    name << setfill('0') << setw(8) << num_image_;
-    ofstream foutC;
-    foutC.open(root_path_ + "txt/" + name.str() + ".txt", std::ios::out);  //以写入和在文件末尾添加的方式打开.txt文件，没有的话就创建该文件。
-    if (!foutC.is_open()) {
-        cerr << "Projection storage failed for picture number " << to_string(num_image_) << "." << endl;
-        return;
-    }
-
-//    Eigen::Matrix3d tmp_R = estimator.Rs[WINDOW_SIZE] * estimator.ric[0];
-//    Eigen::Vector3d tmp_T = estimator.Ps[WINDOW_SIZE] + estimator.Rs[WINDOW_SIZE] * estimator.tic[0];
-    Eigen::Matrix3d tmp_R = R;
-    Eigen::Vector3d tmp_T = T;
-    Eigen::Matrix3d K;
-    /* kitti_10_03_config.yaml */
-    K << 718.856 , 0 , 607.1928,
-            0 , 718.856 , 185.2157,
-            0, 0, 1;
-//    /* cam0_pinhole.yaml */
-//    K << 461.15862106007575 , 0 , 362.65929181685937,
-//            0 , 459.75286598073296 , 248.52105668448124,
-//            0, 0, 1;
-    Eigen::Matrix<double, 3, 4> projection;
-    tmp_R = tmp_R.inverse().eval();
-    tmp_T = tmp_R * tmp_T;
-
-    projection << tmp_R(0,0) , tmp_R(0,1) , tmp_R(0,2) , -tmp_T(0),
-            tmp_R(1,0) , tmp_R(1,1) , tmp_R(1,2) , -tmp_T(1),
-            tmp_R(2,0) , tmp_R(2,1) , tmp_R(2,2) , -tmp_T(2);
-    projection = K * projection;
-
-    foutC << "CONTOUR" << endl;
-    foutC.setf(ios::fixed, ios::floatfield);
-    foutC.precision(6);
-    foutC << projection(0,0) << " " << projection(0,1) << " " << projection(0,2) << " " << projection(0,3) << endl
-          << projection(1,0) << " " << projection(1,1) << " " << projection(1,2) << " " << projection(1,3) << endl
-          << projection(2,0) << " " << projection(2,1) << " " << projection(2,2) << " " << projection(2,3) << endl;
-
-    foutC.close();
-
-//    if (img.channels() <= 1) img = Gray2Color(img);
-    cv::imwrite(root_path_+ "visualize/" + name.str() + ".jpg", img);
-
-    std::ofstream foutC2("/home/hzx/catkin_ws/vio_estimator_" + option_name_ + ".csv", ios::app);
-    foutC2.setf(ios::fixed, ios::floatfield);
-    foutC2.precision(16);
-    foutC2 << tmp_T.x() << ","
-          << tmp_T.y() << ","
-          << tmp_T.z() << endl;
-
-    foutC2.close();
-
-    ++num_image_;
 }
 
 

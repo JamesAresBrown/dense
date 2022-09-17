@@ -3,27 +3,22 @@
 //
 
 #include "ros/ros.h"
-#include <sensor_msgs/NavSatFix.h>
 #include <sensor_msgs/Image.h>
 #include <nav_msgs/Odometry.h>
-#include <nav_msgs/Path.h>
-#include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
 #include <iostream>
-#include <visualization_msgs/Marker.h>
-#include <visualization_msgs/MarkerArray.h>
-#include <fstream>
 #include <queue>
 #include <mutex>
 #include <opencv2/core.hpp>
-#include <opencv2/calib3d.hpp>
 #include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/NavSatFix.h>
 #include "pdense.h"
 
 using namespace std;
 
 queue<nav_msgs::Odometry> odometry_buf;
 queue<sensor_msgs::ImagePtr> image_buf;
+queue<sensor_msgs::NavSatFix> gps_buf;
 std::mutex m_buf;
 
 Pdense pdense("../../../src/VINS-Fusion/dense/config/dense1.yaml", "1");
@@ -40,8 +35,13 @@ void global_odometry_callback(const nav_msgs::Odometry& global_odomatry) {
     m_buf.unlock();
 }
 
+void global_gps_callback(const sensor_msgs::NavSatFix& global_gps) {
+    m_buf.lock();
+    gps_buf.push(global_gps);
+    m_buf.unlock();
+}
+
 [[noreturn]] void sync_process() {
-    int num = 0;
     while(true)
     {
         m_buf.lock();
@@ -69,40 +69,41 @@ void global_odometry_callback(const nav_msgs::Odometry& global_odomatry) {
                 T.y() = odometry_buf.front().pose.pose.position.y;
                 T.z() = odometry_buf.front().pose.pose.position.z;
 
+                if (!pdense.get_InitGPS()) {
+                    if (!gps_buf.empty() && !odometry_buf.empty()) {
+                        double gps_time = gps_buf.front().header.stamp.toSec();
+                        cerr << "ode: " << odometry_time << " gps: " << gps_time << endl;
+                        if (odometry_time < gps_time - 0.0003) {
+                            cerr << "Throw odometry(When aligning odometry and gps)." << endl;
+                        }
+                        else if (odometry_time > gps_time + 0.0003) {
+                            gps_buf.pop();
+                            cerr << "Throw gps(When aligning odometry and gps)." << endl;
+                        }
+                        else {
+                            pdense.InitGPS(T, gps_buf.front().latitude, gps_buf.front().longitude, gps_buf.front().altitude);
+                        }
+                    }
+                }
+                cerr << "is initGPS: " << pdense.get_InitGPS() << endl;
+
                 sensor_msgs::ImageConstPtr image_msg = image_buf.front();
-                cout << image_msg->encoding << endl;
                 cv_bridge::CvImageConstPtr ptr;
-//                if (image_msg->encoding == "8UC1") {
-//                    sensor_msgs::Image img;
-//                    img.header = image_msg->header;
-//                    img.height = image_msg->height;
-//                    img.width = image_msg->width;
-//                    img.is_bigendian = image_msg->is_bigendian;
-//                    img.step = image_msg->step;
-//                    img.data = image_msg->data;
-//                    img.encoding = "8UC2";
-//                    ptr = cv_bridge::toCvCopy(img, sensor_msgs::image_encodings::TYPE_8UC2);
-//                }
-//                else
-                    ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::TYPE_8UC3);
+                ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::TYPE_8UC3);
 
                 cv::Mat img = ptr->image.clone();
 
-                cout << "odometry : " << odometry_time << "  " << "image: " << image_time << endl<< R << endl << T << endl;
-                pdense.write(R, T, img);
+                cout << "odometry : " << odometry_time << "  " << "image: " << image_time << endl;
+//                cout << R << endl << T << endl;
+
+                pdense.Write(R, T, img);
                 odometry_buf.pop();
                 image_buf.pop();
-                ++num;
             }
         }
         m_buf.unlock();
-
-
-        if (num >= pdense.max_num_) {
-            pdense.generateOption();
+        if (pdense.num_image_ >= pdense.max_num_) {
             pdense.pmvs2();
-            pdense.PLY2PCD();
-            pdense.Global();
             break;
         }
 
@@ -116,11 +117,10 @@ int main(int argc, char **argv)
 {
     ros::init(argc, argv, "dense");
     ros::NodeHandle n("~");
-    cout << "dense" << endl;
-//    Pdense pdense("../../../src/VINS-Fusion/dense/config/dense1.yaml", "1");
 
     ros::Subscriber sub_global_odometry = n.subscribe("/globalEstimator/global_odometry", 100, global_odometry_callback);
-    ros::Subscriber sub_global_image = n.subscribe("/gps_image", 1000, global_image_callback);
+    ros::Subscriber sub_global_image = n.subscribe("/vins_estimator/gps_image_0", 1000, global_image_callback);
+    ros::Subscriber sub_global_gps = n.subscribe("/globalEstimator/global_gps", 100, global_gps_callback);
 
     std::thread sync_thread{sync_process};
     ros::spin();

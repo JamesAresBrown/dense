@@ -18,7 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(Ceres REQUIRED)
 
-#add_subdirectory(./ThirdParty/GeographicLib/)
+#add_subdirectory(thirdParty/GeographicLib/)
 
 # pcl
 find_package( PCL REQUIRED COMPONENT common io )
@@ -29,7 +29,7 @@ add_definitions( ${PCL_DEFINITIONS} )
 include_directories(
         ${catkin_INCLUDE_DIRS}
         ${CERES_INCLUDE_DIRS}
-        ../loop_fusion/ThirdParty/GeographicLib/include/
+        thirdParty/GeographicLib/include/
 )
 
 # yaml-cpp
@@ -43,19 +43,21 @@ include_directories(${NLOPT_INCLUDE_DIR})
 
 catkin_package()
 
-#add_executable(dense_node
-#        main/dense_node.cpp
-#        main/pdense.cpp
-#        )
-#
-#target_link_libraries(dense_node
-#        ${catkin_LIBRARIES}
-#        ${CERES_LIBRARIES}
-#        libGeographiccc
-#        ${PCL_LIBRARIES}
-#        ${YAML_LIBRARIES}
-#        pmvs_lib image_lib numeric_lib ${PMVS_LIBRARIES} nlopt tinycthread ${OpenCV_LIBS}
-#        )
+add_executable(dense_node
+        main/dense_node.cpp
+        main/pdense.cpp
+        )
+
+target_link_libraries(dense_node
+        ${catkin_LIBRARIES}
+        ${CERES_LIBRARIES}
+        libGeographiccc
+        ${PCL_LIBRARIES}
+        ${YAML_LIBRARIES}
+        #        nlopt
+        pmvs_lib image_lib numeric_lib ${PMVS_LIBRARIES} tinycthread ${OpenCV_LIBS} ${NLOPT_LIBRARIES}
+        #        dense_lib
+        )
 
 # By default build in Release mode
 IF(NOT CMAKE_BUILD_TYPE AND NOT MSVC)
